@@ -1,4 +1,11 @@
+# streamlit
+# geopy
+# pandas
+# streamlit-js-eval
+
+
 streamlit
-geopy
 pandas
+plotly
+geopy
 streamlit-js-eval
