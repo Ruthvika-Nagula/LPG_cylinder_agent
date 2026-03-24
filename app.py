@@ -2,158 +2,132 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 from data import stations
-from utils import filter_and_sort, reverse_geocode
+from utils import *
 from streamlit_js_eval import get_geolocation
 
-# ----------------- PAGE CONFIG -----------------
 st.set_page_config(page_title="Smart LPG Finder", layout="wide")
 
-# ----------------- TITLE -----------------
-st.title("🔥 Smart LPG Cylinder Finder (AI Powered)")
+st.title("🔥 Smart LPG Cylinder Finder (AI Agent)")
 
-# ----------------- LOCATION -----------------
-st.subheader("📍 Your Location")
-
+# ---------------- LOCATION ----------------
 location = get_geolocation()
 
 if location:
     lat = location["coords"]["latitude"]
     lon = location["coords"]["longitude"]
-    place = reverse_geocode(lat, lon)
-    st.success(f"Detected Location: {place}")
 else:
-    st.warning("⚠️ Location access denied. Using default Hyderabad.")
     lat, lon = 17.385, 78.486
-    place = "Hyderabad"
 
-# ----------------- SIDEBAR -----------------
+# ---------------- ANALYTICS ----------------
+st.subheader("📊 Overall LPG Analytics")
+
+df_all = pd.DataFrame(stations)
+brand_counts = df_all.groupby("brand")["quantity"].sum()
+
+col1, col2, col3 = st.columns(3)
+col1.metric("HP Cylinders", int(brand_counts.get("HP", 0)))
+col2.metric("Indane Cylinders", int(brand_counts.get("Indane", 0)))
+col3.metric("Bharat Cylinders", int(brand_counts.get("Bharat", 0)))
+
+fig = px.pie(df_all, names="brand", values="quantity")
+st.plotly_chart(fig)
+
+st.divider()
+
+# ---------------- SESSION STATE ----------------
+if "search_clicked" not in st.session_state:
+    st.session_state.search_clicked = False
+
+# ---------------- SIDEBAR ----------------
 st.sidebar.header("⚙️ Preferences")
-brand = st.sidebar.selectbox("Select Brand", ["HP", "Indane", "Bharat"])
-budget = st.sidebar.slider("Budget (₹)", 800, 1200, 950)
+brand = st.sidebar.selectbox("Brand", ["HP", "Indane", "Bharat"])
+budget = st.sidebar.slider("Budget", 800, 1200, 950)
 
-# ----------------- SESSION STATE FOR CHART -----------------
-if "chart_type" not in st.session_state:
-    st.session_state.chart_type = "Bar"
+# ---------------- RUN ----------------
+if st.sidebar.button("Find Best Option"):
+    st.session_state.search_clicked = True
 
-# ----------------- FIND STATIONS -----------------
-if st.sidebar.button("Find Stations"):
-    st.session_state.results = filter_and_sort(stations, (lat, lon), brand, budget)
+if st.session_state.search_clicked:
 
-# ----------------- DISPLAY RESULTS -----------------
-if "results" in st.session_state and st.session_state.results:
-    results = st.session_state.results
-    df = pd.DataFrame(results)
+    results = filter_and_sort(stations, (lat, lon), brand, budget)
 
-    st.success("✅ Best Stations Found")
+    if results:
+        best = results[0]
 
-    # ================== 🧠 INSIGHTS ==================
-    st.subheader("🧠 Smart Insights")
+        st.markdown("### 🎯 Personalized Recommendation")
 
-    cheapest = df.loc[df["price"].idxmin()]
-    nearest = df.loc[df["distance"].idxmin()]
-    highest_stock = df.loc[df["quantity"].idxmax()]
+        st.success(f"""
+🏆 Best Choice: {best['name']}
 
-    st.info(f"""
-- Cheapest: {cheapest['name']} (₹{cheapest['price']})
-- Nearest: {nearest['name']} ({nearest['distance']} km)
-- Highest Stock: {highest_stock['name']} ({highest_stock['quantity']})
+💰 Price: ₹{best['price']}
+📍 Distance: {best['distance']} km
+📦 Stock: {best['quantity']}
+
+💡 Recommendation based on price, distance, and availability
 """)
 
-    # ================== 📊 METRICS ==================
-    col1, col2, col3 = st.columns(3)
-    col1.metric("🏪 Stations", len(df))
-    col2.metric("📦 Cylinders", int(df["quantity"].sum()))
-    col3.metric("💰 Avg Price", f"₹{int(df['price'].mean())}")
+        df = pd.DataFrame(results)
 
+        fig = px.scatter(df, x="distance", y="price", size="quantity", color="brand")
+        st.plotly_chart(fig)
+
+        st.subheader("📋 Available Stations")
+
+        for r in results:
+            st.markdown(f"""
+🏪 {r['name']}  
+💰 Price: ₹{r['price']}  
+📍 Distance: {r['distance']} km  
+📦 Stock: {r['quantity']}  
+---
+""")
+
+    # ---------------- PRODUCTS ----------------
     st.divider()
+    st.subheader("🛒 Smart Alternatives")
 
-    # ================== 📊 CHART SWITCH (NO RELOAD FEEL) ==================
-    st.subheader("📊 Analysis")
+    products = get_products()
+    cheapest = products[0] if products else None
 
-    colA, colB = st.columns(2)
+    if cheapest:
+        st.success(f"💡 Cheapest Option: {cheapest['name']} (₹{cheapest['price']})")
 
-    with colA:
-        if st.button("📊 Bar Chart"):
-            st.session_state.chart_type = "Bar"
-
-    with colB:
-        if st.button("📍 Scatter Plot"):
-            st.session_state.chart_type = "Scatter"
-
-    # ----------------- DISPLAY SELECTED CHART -----------------
-    if st.session_state.chart_type == "Bar":
-        fig = px.bar(
-            df,
-            x="name",
-            y="quantity",
-            text="quantity",
-            title="Cylinder Availability per Station"
-        )
+        for p in products:
+            st.markdown(f"""
+🛒 {p['name']}  
+💰 ₹{p['price']}  
+🛍 {p['platform']}  
+🔗 [Buy Now]({p['link']})
+---
+""")
     else:
-        fig = px.scatter(
-            df,
-            x="distance",
-            y="price",
-            size="quantity",
-            color="brand",
-            hover_name="name",
-            title="Price vs Distance vs Availability"
-        )
+        st.warning("⚠️ No valid products found from apps")
 
-    st.plotly_chart(fig, use_container_width=True)
+    # ---------------- EMAIL ----------------
+    st.subheader("📨 Share Recommendation")
+    with st.form("email_form", clear_on_submit=True):
+        email_to_send = st.text_input("📧 Enter your email to receive this recommendation")
+        submit_mail = st.form_submit_button("Send Email")
+        
+        if submit_mail:
+            if not email_to_send:
+                st.warning("⚠️ Please enter an email address.")
+            else:
+                lpg_msg = f"Name: {best['name']}\nPrice: ₹{best['price']}\nDistance: {best['distance']} km\nStock: {best['quantity']}" if results else "Not Available Near You"
+                alt_msg = f"Name: {cheapest['name']}\nPrice: ₹{cheapest['price']}\nPlatform: {cheapest['platform']}\nLink to Buy: {cheapest['link']}" if cheapest else "No alternatives found"
+                
+                msg = f"""
+Hello from Smart LPG Finder!
 
-    st.divider()
+Here is your personalized LPG and alternative recommendation summary:
 
-    # ================== 📋 DETAILS ==================
-    st.subheader("📋 Station Details")
+🔥 Best LPG Direct Option:
+{lpg_msg}
 
-    for i, r in enumerate(results):
-        if i == 0:
-            st.success(f"🏆 Best Choice: {r['name']}")
-
-        st.markdown(f"""
-### 🏪 {r['name']}
-- 💰 Price: ₹{r['price']}
-- 📍 Distance: {r['distance']} km
-- 📦 Cylinders: {r['quantity']}
-""")
-
-    st.divider()
-
-    # ================== 🗺️ MAP ==================
-    st.subheader("🗺️ Live Map View")
-
-    map_df = pd.DataFrame(results)
-    map_df["type"] = "Station"
-
-    user_df = pd.DataFrame([
-        {"lat": lat, "lon": lon, "type": "You", "quantity": 60, "name": "You"}
-    ])
-
-    full_df = pd.concat([map_df, user_df])
-
-    fig_map = px.scatter_mapbox(
-        full_df,
-        lat="lat",
-        lon="lon",
-        color="type",
-        size="quantity",
-        hover_name="name",
-        zoom=12,
-        height=600,
-        color_discrete_map={
-            "You": "blue",
-            "Station": "red"
-        }
-    )
-
-    fig_map.update_layout(
-        mapbox_style="open-street-map",
-        legend_title="Legend",
-        margin={"r": 0, "t": 0, "l": 0, "b": 0}
-    )
-
-    st.plotly_chart(fig_map, use_container_width=True)
-
-elif "results" in st.session_state:
-    st.error("❌ No stations found")
+🛒 Recommended Alternative (Best Value):
+{alt_msg}
+"""
+                if send_email(email_to_send, msg):
+                    st.success("✅ Email sent successfully!")
+                else:
+                    st.error("❌ Email failed to send. Check configuration or app password.")
